@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weatherwatch-collector
+  namespace: weatherwatch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weatherwatch-collector
+  template:
+    metadata:
+      labels:
+        app: weatherwatch-collector
+    spec:
+      containers:
+        - name: collector
+          image: yagnithaa/weatherwatch-collector:1.0.4
+          ports:
+            - containerPort: 8000
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: weatherwatch-db
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: postgresql+psycopg://weatherwatch:$(POSTGRES_PASSWORD)@postgres:5432/weatherwatch
+            - name: COLLECT_INTERVAL_SECONDS
+              value: "300"
+            - name: OPEN_METEO_TIMEOUT_SECONDS
+              value: "15"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: weatherwatch
+      POSTGRES_USER: weatherwatch
+      POSTGRES_PASSWORD: weatherwatch_dev_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U weatherwatch -d weatherwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: api_service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://weatherwatch:weatherwatch_dev_password@postgres:5432/weatherwatch
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8000"
+
+  collector:
+    build: ./collector_service
+    environment:
+      DATABASE_URL: postgresql+psycopg://weatherwatch:weatherwatch_dev_password@postgres:5432/weatherwatch
+      COLLECT_INTERVAL_SECONDS: "300"
+      OPEN_METEO_TIMEOUT_SECONDS: "15"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+
+volumes:
+  postgres_data:

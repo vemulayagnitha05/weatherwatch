@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: weatherwatch
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: weatherwatch
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: weatherwatch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: weatherwatch-db
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: weatherwatch-db
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: weatherwatch-db
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d/init.sql
+              subPath: init.sql
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U weatherwatch -d weatherwatch"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U weatherwatch -d weatherwatch"]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+        - name: init
+          configMap:
+            name: postgres-init
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: weatherwatch
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS cities (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(120) NOT NULL UNIQUE,
+        country VARCHAR(120),
+        latitude DOUBLE PRECISION NOT NULL,
+        longitude DOUBLE PRECISION NOT NULL,
+        active BOOLEAN NOT NULL DEFAULT TRUE
+    );
+
+    CREATE TABLE IF NOT EXISTS readings (
+        id BIGSERIAL PRIMARY KEY,
+        city_id INTEGER NOT NULL REFERENCES cities(id) ON DELETE CASCADE,
+        observed_at TIMESTAMPTZ NOT NULL,
+        temperature_c DOUBLE PRECISION,
+        humidity_percent DOUBLE PRECISION,
+        wind_speed_kmh DOUBLE PRECISION,
+        weather_code INTEGER,
+        pm10 DOUBLE PRECISION,
+        pm25 DOUBLE PRECISION,
+        european_aqi DOUBLE PRECISION,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_readings_city_observed UNIQUE (city_id, observed_at)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_readings_city_time
+    ON readings(city_id, observed_at DESC);
+
+    INSERT INTO cities (name, country, latitude, longitude) VALUES
+    ('Hyderabad', 'India', 17.3850, 78.4867),
+    ('Bengaluru', 'India', 12.9716, 77.5946),
+    ('London', 'United Kingdom', 51.5074, -0.1278),
+    ('Tokyo', 'Japan', 35.6762, 139.6503),
+    ('New York', 'United States', 40.7128, -74.0060)
+    ON CONFLICT (name) DO NOTHING;
